@@ -14,9 +14,9 @@
     "hack:prod": "docker compose up -d && wait-on tcp:5432 && npx prisma db push && next build && next start"
   },
   "dependencies": {
-    "@clerk/nextjs": "^6.35.5",
     "@prisma/client": "^7.0.1",
     "@radix-ui/react-slot": "^1.2.4",
+    "better-auth": "^1.4.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",

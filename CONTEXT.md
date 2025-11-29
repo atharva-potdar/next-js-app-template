@@ -1,6 +1,6 @@
 # CONTEXT.md - Hackathon Starter Template Brain
 
-> **Purpose**: This document defines the architecture, patterns, and rules of engagement for building features on this Next.js 16 + React 19 + Prisma + Clerk hackathon starter. Read this first before writing any code.
+> **Purpose**: This document defines the architecture, patterns, and rules of engagement for building features on this Next.js 16 + React 19 + Prisma + Better-Auth hackathon starter. Read this first before writing any code.
 
 ---
 
@@ -8,7 +8,7 @@
 
 - **Next.js 16.0.5** (App Router, RSC, Server Actions)
 - **React 19.2.0** with React Compiler enabled
-- **Clerk 6.35.5** (Authentication)
+- **Better-Auth 1.4.3** (Authentication)
 - **Prisma 7.0.1** + PostgreSQL 18 (Docker)
 - **ShadCN UI** (New York style, Tailwind v4)
 - **TypeScript 5** (strict mode)
@@ -158,11 +158,13 @@ export default async function PostsPage() {
 
 **Use for**: Create, update, delete operations
 
-```tsx
+````tsx
 // app/actions/posts.ts
+```tsx
 "use server";
 
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
+import { headers } from "next/headers";
 import { prisma } from "@/lib/prisma";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
@@ -174,27 +176,30 @@ const createPostSchema = z.object({
 
 export async function createPost(formData: FormData) {
   // 1. Authenticate
-  const { userId } = await auth();
-  if (!userId) {
+  const session = await auth.api.getSession({
+    headers: await headers(),
+  });
+
+  if (!session) {
     return { success: false, error: "Unauthorized" };
   }
 
   // 2. Validate (ALWAYS validate server-side)
-  const data = createPostSchema.safeParse({
+  const result = createPostSchema.safeParse({
     title: formData.get("title"),
     content: formData.get("content"),
   });
 
-  if (!data.success) {
-    return { success: false, error: data.error.message };
+  if (!result.success) {
+    return { success: false, error: result.error.issues[0]?.message ?? "Validation failed" };
   }
 
   // 3. Mutate database
   try {
     const post = await prisma.post.create({
       data: {
-        ...data.data,
-        authorId: userId,
+        ...result.data,
+        authorId: session.user.id,
       },
     });
 
@@ -206,7 +211,7 @@ export async function createPost(formData: FormData) {
     return { success: false, error: "Failed to create post" };
   }
 }
-```
+````
 
 ### Client Components - Only When Needed
 
@@ -227,12 +232,14 @@ const schema = z.object({
   content: z.string().min(10, "Content too short"),
 });
 
+type FormData = z.infer<typeof schema>;
+
 export function CreatePostForm() {
   const {
     register,
     handleSubmit,
     formState: { errors },
-  } = useForm({
+  } = useForm<FormData>({
     resolver: zodResolver(schema),
   });
 
@@ -276,12 +283,12 @@ import useSWR from "swr";
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
 export function LivePostList() {
-  const { data, error, mutate } = useSWR("/api/posts", fetcher, {
+  const { data, error, isLoading } = useSWR("/api/posts", fetcher, {
     refreshInterval: 3000, // Poll every 3s
   });
 
   if (error) return <div>Failed to load</div>;
-  if (!data) return <div>Loading...</div>;
+  if (isLoading) return <div>Loading...</div>;
 
   return (
     <ul>
@@ -297,82 +304,152 @@ export function LivePostList() {
 
 **Don't create `/app/api/*` routes** unless you need:
 
-- Webhook endpoints (Stripe, Clerk, etc.)
+- Webhook endpoints (Stripe, etc.)
 - External API access (mobile apps, third-party services)
 
 For internal data fetching, use **Server Components + Server Actions**.
 
 ---
 
-## 3. Authentication Integration (Clerk)
+## 3. Authentication Integration (Better-Auth)
 
 ### Setup Checklist
 
 1. **Environment Variables** (`.env.local`):
 
    ```env
-   NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_...
-   CLERK_SECRET_KEY=sk_test_...
+   BETTER_AUTH_SECRET="your-secret-key-here" # Generate with: openssl rand -base64 32
+   BETTER_AUTH_URL="http://localhost:3000" # Your app URL
+   DATABASE_URL="postgresql://admin:password123@localhost:5432/hackathon"
    ```
 
-2. **Wrap App in ClerkProvider** ([`app/layout.tsx`](app/layout.tsx)):
-
-   ```tsx
-   import { ClerkProvider } from "@clerk/nextjs";
-
-   export default function RootLayout({ children }) {
-     return (
-       <ClerkProvider>
-         <html lang="en">
-           <body>{children}</body>
-         </html>
-       </ClerkProvider>
-     );
-   }
-   ```
-
-3. **Create Middleware** (`middleware.ts`):
+2. **Create Auth Configuration** (`lib/auth.ts`):
 
    ```ts
-   import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
+   import { betterAuth } from "better-auth";
+   import { prismaAdapter } from "better-auth/adapters/prisma";
+   import { nextCookies } from "better-auth/next-js";
+   import { prisma } from "@/lib/prisma";
 
-   const isPublicRoute = createRouteMatcher([
-     "/",
-     "/sign-in(.*)",
-     "/sign-up(.*)",
-     "/api/webhooks(.*)",
-   ]);
+   export const auth = betterAuth({
+     database: prismaAdapter(prisma, {
+       provider: "postgresql",
+     }),
+     emailAndPassword: {
+       enabled: true,
+     },
+     socialProviders: {
+       github: {
+         clientId: process.env.GITHUB_CLIENT_ID || "",
+         clientSecret: process.env.GITHUB_CLIENT_SECRET || "",
+       },
+       google: {
+         clientId: process.env.GOOGLE_CLIENT_ID || "",
+         clientSecret: process.env.GOOGLE_CLIENT_SECRET || "",
+       },
+     },
+     plugins: [
+       nextCookies(), // Required for server actions to set cookies
+     ],
+   });
+   ```
 
-   export default clerkMiddleware(async (auth, request) => {
-     if (!isPublicRoute(request)) {
-       await auth.protect();
-     }
+3. **Create Auth API Route** (`app/api/auth/[...all]/route.ts`):
+
+   ```ts
+   import { auth } from "@/lib/auth";
+   import { toNextJsHandler } from "better-auth/next-js";
+
+   export const { GET, POST } = toNextJsHandler(auth.handler);
+   ```
+
+4. **Create Client Auth Hook** (`lib/auth-client.ts`):
+
+   ```ts
+   import { createAuthClient } from "better-auth/react";
+
+   export const authClient = createAuthClient({
+     // baseURL is optional if auth server runs on same domain
+     // baseURL: "http://localhost:3000"
    });
 
-   export const config = {
-     matcher: [
-       "/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
-       "/(api|trpc)(.*)",
-     ],
-   };
+   export const { useSession, signIn, signOut, signUp } = authClient;
    ```
+
+### Prisma Schema for Better-Auth
+
+Better-Auth requires specific tables. Add to your `prisma/schema.prisma`:
+
+```prisma
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  emailVerified Boolean   @default(false)
+  name          String?
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  sessions      Session[]
+  accounts      Account[]
+  posts         Post[]    // Your app relations
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  expiresAt DateTime
+  token     String   @unique
+  ipAddress String?
+  userAgent String?
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Account {
+  id           String   @id @default(cuid())
+  userId       String
+  accountId    String
+  providerId   String
+  accessToken  String?
+  refreshToken String?
+  expiresAt    DateTime?
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([providerId, accountId])
+}
+
+model Verification {
+  id         String   @id @default(cuid())
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+
+  @@unique([identifier, value])
+}
+```
 
 ### Getting User Data
 
 **In Server Components**:
 
 ```tsx
-import { auth, currentUser } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
+import { headers } from "next/headers";
 
 export default async function ProfilePage() {
-  const { userId } = await auth();
-  const user = await currentUser();
+  const session = await auth.api.getSession({
+    headers: await headers(),
+  });
 
-  if (!userId) {
+  if (!session) {
     return <div>Not signed in</div>;
   }
 
-  return <div>Hello {user?.firstName}!</div>;
+  return <div>Hello {session.user.name}!</div>;
 }
 ```
 
@@ -381,85 +458,103 @@ export default async function ProfilePage() {
 ```tsx
 "use client";
 
-import { useAuth, useUser } from "@clerk/nextjs";
+import { useSession } from "@/lib/auth-client";
 
 export function UserProfile() {
-  const { userId } = useAuth();
-  const { user } = useUser();
+  const { data: session } = useSession();
 
-  return <div>{user?.firstName}</div>;
+  if (!session) {
+    return <div>Not signed in</div>;
+  }
+
+  return <div>Hello {session.user.name}!</div>;
 }
 ```
 
-### Linking Clerk Users to Prisma
-
-**Prisma Schema**:
-
-```prisma
-model User {
-  id        String   @id @default(cuid())
-  clerkId   String   @unique // Link to Clerk userId
-  email     String   @unique
-  name      String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  posts     Post[]
-}
-```
-
-**Server Action (First Login)**:
+**In Server Actions**:
 
 ```tsx
 "use server";
 
-import { auth } from "@clerk/nextjs/server";
-import { prisma } from "@/lib/prisma";
+import { auth } from "@/lib/auth";
+import { headers } from "next/headers";
 
-export async function syncUser() {
-  const { userId } = await auth();
-  if (!userId) return;
-
-  // Check if user exists in DB
-  let user = await prisma.user.findUnique({
-    where: { clerkId: userId },
+export async function createPost(formData: FormData) {
+  const session = await auth.api.getSession({
+    headers: await headers(),
   });
 
-  if (!user) {
-    // Create user on first login
-    user = await prisma.user.create({
-      data: {
-        clerkId: userId,
-        email: "...", // Get from Clerk user object
-      },
-    });
+  if (!session) {
+    throw new Error("Unauthorized");
   }
 
-  return user;
+  const userId = session.user.id;
+  // ... your logic here
 }
 ```
 
-### UI Components
+### Authentication UI Components
+
+**Sign In Form**:
 
 ```tsx
-import {
-  SignInButton,
-  SignUpButton,
-  SignedIn,
-  SignedOut,
-  UserButton,
-} from "@clerk/nextjs";
+"use client";
 
-export function Header() {
+import { authClient } from "@/lib/auth-client";
+import { Button } from "@/components/ui/button";
+
+export function SignInForm() {
+  const handleSignIn = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const formData = new FormData(e.currentTarget);
+
+    await authClient.signIn.email({
+      email: formData.get("email") as string,
+      password: formData.get("password") as string,
+    });
+  };
+
   return (
-    <header>
-      <SignedOut>
-        <SignInButton />
-        <SignUpButton />
-      </SignedOut>
-      <SignedIn>
-        <UserButton />
-      </SignedIn>
-    </header>
+    <form onSubmit={handleSignIn}>
+      <input name="email" type="email" required />
+      <input name="password" type="password" required />
+      <Button type="submit">Sign In</Button>
+    </form>
+  );
+}
+```
+
+**Sign Out Button**:
+
+```tsx
+"use client";
+
+import { authClient } from "@/lib/auth-client";
+import { Button } from "@/components/ui/button";
+
+export function SignOutButton() {
+  return <Button onClick={() => authClient.signOut()}>Sign Out</Button>;
+}
+```
+
+**OAuth Buttons**:
+
+```tsx
+"use client";
+
+import { authClient } from "@/lib/auth-client";
+import { Button } from "@/components/ui/button";
+
+export function OAuthButtons() {
+  return (
+    <div>
+      <Button onClick={() => authClient.signIn.social({ provider: "github" })}>
+        Sign in with GitHub
+      </Button>
+      <Button onClick={() => authClient.signIn.social({ provider: "google" })}>
+        Sign in with Google
+      </Button>
+    </div>
   );
 }
 ```
@@ -663,10 +758,25 @@ const schema = z.object({
 
 export async function createUser(data: unknown) {
   // Re-validate on server
-  const parsed = schema.safeParse(data);
+  const result = schema.safeParse(data);
 
-  if (!parsed.success) {
-    return { success: false, error: "Invalid data" };
+  if (!result.success) {
+    // Option 1: Return first error message
+    return { success: false, error: result.error.issues[0]?.message };
+  }
+
+  // Proceed with mutation
+  // ...
+}
+
+// For field-specific errors, use z.flattenError():
+export async function createUserWithFieldErrors(data: unknown) {
+  const result = schema.safeParse(data);
+
+  if (!result.success) {
+    const formatted = z.flattenError(result.error);
+    // Returns: { formErrors: string[], fieldErrors: { email?: string[], password?: string[] } }
+    return { success: false, fieldErrors: formatted.fieldErrors };
   }
 
   // Proceed with mutation
@@ -682,26 +792,30 @@ export async function createUser(data: unknown) {
 import useSWR from "swr";
 import { deletePost } from "@/app/actions/posts";
 
+const fetcher = (url: string) => fetch(url).then((r) => r.json());
+
 export function PostList() {
   const { data, mutate } = useSWR("/api/posts", fetcher);
 
   const handleDelete = async (postId: string) => {
     // Optimistic update
-    mutate(
-      (current) => ({
-        ...current,
-        posts: current.posts.filter((p) => p.id !== postId),
-      }),
-      false // Don't revalidate yet
+    await mutate(
+      async () => {
+        const result = await deletePost(postId);
+        if (!result.success) {
+          throw new Error("Failed to delete");
+        }
+        return result.data;
+      },
+      {
+        optimisticData: {
+          ...data,
+          posts: data.posts.filter((p) => p.id !== postId),
+        },
+        rollbackOnError: true,
+        revalidate: false,
+      }
     );
-
-    const result = await deletePost(postId);
-
-    if (!result.success) {
-      // Revert on error
-      mutate();
-      toast.error("Failed to delete");
-    }
   };
 
   return (
@@ -797,8 +911,11 @@ my-app/
 │   │   ├── users.ts       # User-related mutations
 │   │   └── comments.ts    # Comment-related mutations
 │   ├── api/               # Only for webhooks/external APIs
+│   │   ├── auth/
+│   │   │   └── [...all]/
+│   │   │       └── route.ts  # Better-Auth API route
 │   │   └── webhooks/
-│   │       └── clerk/
+│   │       └── stripe/
 │   │           └── route.ts
 │   ├── (routes)/          # Route groups (optional)
 │   │   ├── (auth)/
@@ -808,7 +925,7 @@ my-app/
 │   │       ├── posts/
 │   │       └── profile/
 │   ├── globals.css        # Global styles + Tailwind imports
-│   ├── layout.tsx         # Root layout (ClerkProvider here)
+│   ├── layout.tsx         # Root layout
 │   └── page.tsx           # Home page
 │
 ├── components/
@@ -1198,9 +1315,15 @@ Create `.env.production`:
 # Database
 DATABASE_URL="postgresql://user:pass@prod-host:5432/dbname"
 
-# Clerk
-NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY="pk_live_..."
-CLERK_SECRET_KEY="sk_live_..."
+# Better-Auth
+BETTER_AUTH_SECRET="your-production-secret-key"
+BETTER_AUTH_URL="https://yourapp.com"
+
+# Optional: OAuth providers
+GITHUB_CLIENT_ID="your-github-client-id"
+GITHUB_CLIENT_SECRET="your-github-client-secret"
+GOOGLE_CLIENT_ID="your-google-client-id"
+GOOGLE_CLIENT_SECRET="your-google-client-secret"
 
 # Next.js
 NEXT_PUBLIC_APP_URL="https://yourapp.com"
@@ -1263,8 +1386,8 @@ const prisma = new PrismaClient();
 async function main() {
   await prisma.user.create({
     data: {
-      clerkId: "seed-user-1",
       email: "demo@example.com",
+      emailVerified: true,
       name: "Demo User",
     },
   });
@@ -1368,25 +1491,41 @@ async function SearchPage({ searchParams }: { searchParams: { q?: string } }) {
 
 import useSWRInfinite from "swr/infinite";
 
+const fetcher = (url: string) => fetch(url).then((r) => r.json());
+
 export function InfinitePostList() {
   const getKey = (pageIndex: number, previousPageData: any) => {
     if (previousPageData && !previousPageData.posts.length) return null;
     return `/api/posts?page=${pageIndex + 1}`;
   };
 
-  const { data, size, setSize } = useSWRInfinite(getKey, fetcher);
+  const { data, error, size, setSize, isLoading, isValidating } =
+    useSWRInfinite(getKey, fetcher);
 
   const posts = data ? data.flatMap((page) => page.posts) : [];
   const isLoadingMore =
-    size > 0 && data && typeof data[size - 1] === "undefined";
+    isLoading || (size > 0 && data && typeof data[size - 1] === "undefined");
+  const isEmpty = data?.[0]?.posts?.length === 0;
+  const isReachingEnd =
+    isEmpty || (data && data[data.length - 1]?.posts?.length < 10);
+
+  if (error) return <div>Failed to load posts</div>;
+  if (isLoading) return <div>Loading...</div>;
 
   return (
     <div>
       {posts.map((post) => (
         <PostCard key={post.id} post={post} />
       ))}
-      <button onClick={() => setSize(size + 1)} disabled={isLoadingMore}>
-        {isLoadingMore ? "Loading..." : "Load More"}
+      <button
+        onClick={() => setSize(size + 1)}
+        disabled={isLoadingMore || isReachingEnd}
+      >
+        {isLoadingMore
+          ? "Loading..."
+          : isReachingEnd
+          ? "No more posts"
+          : "Load More"}
       </button>
     </div>
   );
@@ -1437,15 +1576,20 @@ export function FileUploadForm() {
 
 import useSWR from "swr";
 
+const fetcher = (url: string) => fetch(url).then((r) => r.json());
+
 export function LiveNotifications() {
-  const { data } = useSWR("/api/notifications", fetcher, {
+  const { data, error, isLoading } = useSWR("/api/notifications", fetcher, {
     refreshInterval: 5000, // Poll every 5 seconds
     revalidateOnFocus: true,
   });
 
+  if (error) return <div>Error loading notifications</div>;
+  if (isLoading) return <div>Loading...</div>;
+
   return (
     <div>
-      {data?.notifications.map((notif) => (
+      {data.notifications.map((notif) => (
         <div key={notif.id}>{notif.message}</div>
       ))}
     </div>
@@ -1457,19 +1601,22 @@ export function LiveNotifications() {
 
 ```tsx
 // app/dashboard/page.tsx
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
 export default async function DashboardPage() {
-  const { userId } = await auth();
+  const session = await auth.api.getSession({
+    headers: await headers(),
+  });
 
-  if (!userId) {
+  if (!session) {
     redirect("/sign-in");
   }
 
   // Fetch user-specific data
   const user = await prisma.user.findUnique({
-    where: { clerkId: userId },
+    where: { id: session.user.id },
   });
 
   return <div>Welcome, {user?.name}!</div>;
@@ -1541,9 +1688,15 @@ import { usePosts } from "@/hooks/use-posts";
    # Database (Docker Compose default)
    DATABASE_URL="postgresql://admin:password123@localhost:5432/hackathon"
 
-   # Clerk Authentication (get from https://dashboard.clerk.com)
-   NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY="pk_test_..."
-   CLERK_SECRET_KEY="sk_test_..."
+   # Better-Auth (generate secret with: openssl rand -base64 32)
+   BETTER_AUTH_SECRET="your-secret-key-here"
+   BETTER_AUTH_URL="http://localhost:3000"
+
+   # Optional: OAuth Providers
+   # GITHUB_CLIENT_ID="your-github-client-id"
+   # GITHUB_CLIENT_SECRET="your-github-client-secret"
+   # GOOGLE_CLIENT_ID="your-google-client-id"
+   # GOOGLE_CLIENT_SECRET="your-google-client-secret"
 
    # Optional: App URL (for production)
    # NEXT_PUBLIC_APP_URL="https://yourapp.com"
@@ -1554,7 +1707,7 @@ import { usePosts } from "@/hooks/use-posts";
 
    ```bash
    cp .env.example .env.local
-   # Then edit .env.local with your actual Clerk keys
+   # Then edit .env.local with your actual Better-Auth secret and OAuth credentials
    ```
 
 5. **Create Prisma schema** (`prisma/schema.prisma`):
@@ -1570,16 +1723,56 @@ import { usePosts } from "@/hooks/use-posts";
    }
 
    model User {
+     id            String    @id @default(cuid())
+     email         String    @unique
+     emailVerified Boolean   @default(false)
+     name          String?
+     image         String?
+     createdAt     DateTime  @default(now())
+     updatedAt     DateTime  @updatedAt
+     sessions      Session[]
+     accounts      Account[]
+   }
+
+   model Session {
      id        String   @id @default(cuid())
-     clerkId   String   @unique
-     email     String   @unique
-     name      String?
+     userId    String
+     expiresAt DateTime
+     token     String   @unique
+     ipAddress String?
+     userAgent String?
+     user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
      createdAt DateTime @default(now())
      updatedAt DateTime @updatedAt
    }
+
+   model Account {
+     id           String   @id @default(cuid())
+     userId       String
+     accountId    String
+     providerId   String
+     accessToken  String?
+     refreshToken String?
+     expiresAt    DateTime?
+     user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+     createdAt    DateTime @default(now())
+     updatedAt    DateTime @updatedAt
+
+     @@unique([providerId, accountId])
+   }
+
+   model Verification {
+     id         String   @id @default(cuid())
+     identifier String
+     value      String
+     expiresAt  DateTime
+     createdAt  DateTime @default(now())
+
+     @@unique([identifier, value])
+   }
    ```
 
-6. **Setup Clerk** (add `ClerkProvider` to `app/layout.tsx`, create `middleware.ts`)
+6. **Setup Better-Auth** (create `lib/auth.ts`, `lib/auth-client.ts`, and `app/api/auth/[...all]/route.ts` as shown in Section 3)
 
 7. **Start building**:
 
@@ -1598,7 +1791,7 @@ import { usePosts } from "@/hooks/use-posts";
 
 - [Next.js 15 Docs](https://nextjs.org/docs)
 - [Prisma Docs](https://www.prisma.io/docs)
-- [Clerk Docs](https://clerk.com/docs)
+- [Better-Auth Docs](https://www.better-auth.com/docs)
 - [ShadCN UI](https://ui.shadcn.com)
 - [React Hook Form](https://react-hook-form.com)
 - [Zod](https://zod.dev)
