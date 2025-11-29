@@ -6,7 +6,12 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "db:up": "docker compose up -d",
+    "db:down": "docker compose down",
+    "db:nuke": "docker compose down -v && docker compose up -d",
+    "hack:dev": "docker compose up -d && wait-on tcp:5432 && npx prisma db push && next dev",
+    "hack:prod": "docker compose up -d && wait-on tcp:5432 && npx prisma db push && next build && next start"
   },
   "dependencies": {
     "@clerk/nextjs": "^6.35.5",
@@ -14,13 +19,16 @@
     "@radix-ui/react-slot": "^1.2.4",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "date-fns": "^4.1.0",
     "lucide-react": "^0.555.0",
     "next": "16.0.5",
     "react": "19.2.0",
     "react-dom": "19.2.0",
     "react-hook-form": "^7.67.0",
+    "sonner": "^2.0.7",
     "swr": "^2.3.7",
     "tailwind-merge": "^3.4.0",
+    "wait-on": "^9.0.3",
     "zod": "^4.1.13"
   },
   "devDependencies": {
