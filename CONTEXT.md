@@ -95,7 +95,7 @@ updatedAt DateTime @updatedAt
 The Docker Compose setup provides:
 
 - **Host**: `localhost`
-- **Port**: `5432`
+- **Port**: `5433`
 - **Database**: `hackathon`
 - **User**: `admin`
 - **Password**: `password123`
@@ -103,7 +103,7 @@ The Docker Compose setup provides:
 **Environment Variable** (`.env`):
 
 ```env
-DATABASE_URL="postgresql://admin:password123@localhost:5432/hackathon"
+DATABASE_URL="postgresql://admin:password123@localhost:5433/hackathon"
 ```
 
 ---
@@ -320,7 +320,7 @@ For internal data fetching, use **Server Components + Server Actions**.
    ```env
    BETTER_AUTH_SECRET="your-secret-key-here" # Generate with: openssl rand -base64 32
    BETTER_AUTH_URL="http://localhost:3000" # Your app URL
-   DATABASE_URL="postgresql://admin:password123@localhost:5432/hackathon"
+   DATABASE_URL="postgresql://admin:password123@localhost:5433/hackathon"
    ```
 
 2. **Create Auth Configuration** (`lib/auth.ts`):
@@ -875,7 +875,7 @@ From [`docker-compose.yml`](docker-compose.yml):
 
 - **Container Name**: `hackathon-db`
 - **Image**: `postgres:18-alpine`
-- **Port**: `5432:5432`
+- **Port**: `5433:5432`
 - **User**: `admin`
 - **Password**: `password123`
 - **Database**: `hackathon`
@@ -896,7 +896,7 @@ healthcheck:
 The `wait-on` package ensures DB is ready before Prisma operations:
 
 ```json
-"hack:dev": "docker compose up -d && wait-on tcp:5432 && npx prisma db push && next dev"
+"hack:dev": "docker compose up -d && wait-on tcp:5433 && npx prisma db push && next dev"
 ```
 
 ---
@@ -1686,7 +1686,7 @@ import { usePosts } from "@/hooks/use-posts";
    ```bash
    cat > .env.example << 'EOF'
    # Database (Docker Compose default)
-   DATABASE_URL="postgresql://admin:password123@localhost:5432/hackathon"
+   DATABASE_URL="postgresql://admin:password123@localhost:5433/hackathon"
 
    # Better-Auth (generate secret with: openssl rand -base64 32)
    BETTER_AUTH_SECRET="your-secret-key-here"
