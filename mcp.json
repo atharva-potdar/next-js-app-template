@@ -1,0 +1,24 @@
+{
+  "mcpServers": {
+    "nextjs-mcp": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "next-devtools-mcp@latest"
+      ]
+    },
+    "prisma-mcp": {
+      "url": "https://mcp.prisma.io/mcp"
+    },
+    "shadcn-mcp": {
+      "command": "npx",
+      "args": [
+        "shadcn@latest",
+        "mcp"
+      ]
+    },
+    "betterauth-mcp": {
+      "url": "https://mcp.chonkie.ai/better-auth/better-auth-builder/mcp"
+    }
+  }
+}
