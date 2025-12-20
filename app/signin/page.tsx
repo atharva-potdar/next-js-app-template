@@ -3,7 +3,10 @@
 import React, { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { signIn } from "@/lib/auth-client";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 
 export default function SignInPage() {
   const router = useRouter();
@@ -26,6 +29,7 @@ export default function SignInPage() {
       const data = await resp.json();
       if (data?.success) {
         router.push("/");
+        router.refresh();
       } else {
         setError(data?.error ?? "Sign in failed");
       }
@@ -37,52 +41,57 @@ export default function SignInPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-zinc-900">
-      <div className="w-full max-w-md p-10 rounded-3xl border-2 border-pink-400">
-        <div className="flex flex-col items-center gap-6">
-          <div className="h-16 w-36 bg-zinc-800 rounded-md flex items-center justify-center text-pink-300">
-            App Logo
+    <div className="min-h-screen flex items-center justify-center bg-zinc-50/50 p-4">
+      <Card className="w-full max-w-[400px] shadow-sm border-zinc-200">
+        <CardHeader className="pt-8 pb-6 flex flex-col items-center text-center">
+          <div className="h-10 w-10 bg-zinc-900 rounded-xl flex items-center justify-center text-white mb-4">
+            <span className="font-bold text-lg">A</span>
           </div>
-
-          <form className="w-full" onSubmit={onSubmit}>
-            <div className="mb-4">
-              <label className="block text-pink-300 mb-2">Email</label>
-              <input
-                className="w-full px-3 py-2 rounded-md bg-zinc-800 text-white border border-pink-400"
+          <CardTitle className="text-2xl font-semibold tracking-tight">Sign in</CardTitle>
+          <CardDescription className="text-zinc-500">
+            Enter your email and password to access your account
+          </CardDescription>
+        </CardHeader>
+        <form onSubmit={onSubmit}>
+          <CardContent className="grid gap-6 px-6 pb-0 pt-2">
+            <div className="grid gap-2">
+              <Label htmlFor="email">Email</Label>
+              <Input
+                id="email"
+                type="email"
+                placeholder=""
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                type="email"
                 required
+                className="bg-white"
               />
             </div>
-
-            <div className="mb-4">
-              <label className="block text-pink-300 mb-2">Password</label>
-              <input
-                className="w-full px-3 py-2 rounded-md bg-zinc-800 text-white border border-pink-400"
+            <div className="grid gap-2">
+              <Label htmlFor="password">Password</Label>
+              <Input
+                id="password"
+                type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                type="password"
                 required
+                className="bg-white"
               />
             </div>
-
-            {error && <p className="text-red-400 mb-2">{error}</p>}
-
-            <button
-              type="submit"
-              className="w-full py-2 rounded-md bg-pink-400 text-zinc-900 font-semibold"
-              disabled={loading}
-            >
-              {loading ? "Signing in..." : "SIGN IN"}
-            </button>
-          </form>
-
-          <div className="text-sm text-pink-300">
-            <Link href="/signup">Don't have an account? Sign Up</Link>
-          </div>
-        </div>
-      </div>
+            {error && <p className="text-sm font-medium text-destructive text-center">{error}</p>}
+          </CardContent>
+          <CardFooter className="flex flex-col gap-4 pb-8 pt-4 px-6">
+            <Button type="submit" className="w-full font-medium" disabled={loading}>
+              {loading ? "Signing in..." : "Sign In"}
+            </Button>
+            <div className="text-sm text-center text-zinc-500">
+              Don't have an account?{" "}
+              <Link href="/signup" className="text-zinc-900 font-medium hover:underline underline-offset-4">
+                Sign up
+              </Link>
+            </div>
+          </CardFooter>
+        </form>
+      </Card>
     </div>
   );
 }
