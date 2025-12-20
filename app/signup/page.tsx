@@ -12,14 +12,21 @@ export default function SignUpPage() {
   const router = useRouter();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const passwordsMatch = password === confirmPassword;
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
+    if (password !== confirmPassword) {
+      setError("Passwords do not match");
+      setLoading(false);
+      return;
+    }
     try {
       const resp = await fetch("/api/auth/register", {
         method: "POST",
@@ -59,7 +66,7 @@ export default function SignUpPage() {
               <Label htmlFor="name">Full Name</Label>
               <Input
                 id="name"
-                placeholder="John Doe"
+                placeholder=""
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 required
@@ -89,10 +96,24 @@ export default function SignUpPage() {
                 className="bg-white"
               />
             </div>
+            <div className="grid gap-2">
+              <Label htmlFor="confirmPassword">Confirm Password</Label>
+              <Input
+                id="confirmPassword"
+                type="password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                required
+                className="bg-white"
+              />
+              {confirmPassword && password !== confirmPassword && (
+                <p className="text-sm text-destructive">Passwords do not match</p>
+              )}
+            </div>
             {error && <p className="text-sm font-medium text-destructive text-center">{error}</p>}
           </CardContent>
           <CardFooter className="flex flex-col gap-4 pb-8 pt-4 px-6">
-            <Button type="submit" className="w-full font-medium" disabled={loading}>
+            <Button type="submit" className="w-full font-medium" disabled={loading || !passwordsMatch}>
               {loading ? "Creating account..." : "Sign Up"}
             </Button>
             <div className="text-sm text-center text-zinc-500">

@@ -6,12 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint",
-    "db:up": "docker compose up -d",
-    "db:down": "docker compose down",
-    "db:nuke": "docker compose down -v && docker compose up -d",
-    "hack:dev": "docker compose up -d && wait-on tcp:5433 && npx prisma db push && next dev",
-    "hack:prod": "docker compose up -d && wait-on tcp:5433 && npx prisma db push && next build && next start"
+    "lint": "eslint"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.2.0",
